@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>出席管理系統｜登入與權限測試</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#667085; --line:#e4e7ec; --brand:#1a73e8; --ok:#0f8a4b; --bad:#c62828; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12151b; --card:#1b2029; --text:#e8eaf0; --muted:#98a2b3; --line:#2b3240; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 system-ui,-apple-system,"Noto Sans TC",sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:16px; }
+  h1 { font-size:1.25rem; margin:8px 0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:12px; }
+  button { min-height:48px; padding:0 18px; font-size:1rem; border:0; border-radius:10px; background:var(--brand); color:#fff; cursor:pointer; width:100%; margin-top:8px; }
+  button.secondary { background:transparent; color:var(--brand); border:1px solid var(--brand); }
+  input { width:100%; min-height:48px; padding:0 12px; font-size:1rem; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--text); }
+  pre { white-space:pre-wrap; word-break:break-all; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; margin:8px 0 0; font-size:.85rem; }
+  .muted { color:var(--muted); font-size:.9rem; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>出席管理系統｜登入與權限測試</h1>
+
+  <section class="card" id="loginCard">
+    <div id="gbtn"></div>
+    <p class="muted" id="loginMsg">請使用被授權的 Google 帳號登入。</p>
+  </section>
+
+  <section class="card" id="testCard" hidden>
+    <div id="who"></div>
+    <button id="t1">測試：我的班級清單</button>
+    <input id="classId" placeholder="輸入班級 ID，例如 CLS-B" style="margin-top:12px" autocapitalize="off">
+    <button id="t2">測試：存取指定班級</button>
+    <button id="t3">測試：管理者專屬功能</button>
+    <button id="out" class="secondary">登出</button>
+    <pre id="result" aria-live="polite"></pre>
+  </section>
+</main>
+
+<script>
+/* ========== 部署前請修改這兩個值（兩者都不是機密）========== */
+const CLIENT_ID = '貼上你的 OAuth Client ID.apps.googleusercontent.com';
+const API_URL   = '貼上 Apps Script Web App 的 /exec 網址';
+/* ============================================================ */
+
+let idToken = null;   // 只放在記憶體，不寫入 localStorage
+
+function show(obj) { document.getElementById('result').textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2); }
+
+async function api(action, params) {
+  try {
+    const r = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },  // 避免 CORS 預檢
+      body: JSON.stringify({ action: action, params: params || {}, idToken: idToken })
+    });
+    return await r.json();
+  } catch (e) {
+    return { ok: false, code: 'NETWORK', message: '網路連線失敗，請稍後再試' };
+  }
+}
+
+async function onCredential(resp) {
+  idToken = resp.credential;
+  const res = await api('whoami');
+  if (!res.ok) {
+    idToken = null;
+    document.getElementById('loginMsg').innerHTML = '<span class="bad">登入失敗：' + res.message + '（' + res.code + '）</span>';
+    return;
+  }
+  const d = res.data;
+  document.getElementById('loginCard').hidden = true;
+  document.getElementById('testCard').hidden = false;
+  document.getElementById('who').innerHTML =
+    '<strong>' + esc(d.name) + '</strong><br><span class="muted">' + esc(d.email) + '｜角色：' + esc(d.role) + '｜可存取班級數：' + d.classCount + '</span>';
+  show(res);
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+window.addEventListener('load', function init() {
+  if (!window.google || !google.accounts) { return setTimeout(init, 200); }
+  google.accounts.id.initialize({ client_id: CLIENT_ID, callback: onCredential, auto_select: false });
+  google.accounts.id.renderButton(document.getElementById('gbtn'), { theme: 'outline', size: 'large', text: 'signin_with', locale: 'zh-TW' });
+
+  document.getElementById('t1').onclick = async function () { show(await api('myClasses')); };
+  document.getElementById('t2').onclick = async function () { show(await api('checkClassAccess', { classId: document.getElementById('classId').value.trim() })); };
+  document.getElementById('t3').onclick = async function () { show(await api('adminOnlyPing')); };
+  document.getElementById('out').onclick = function () {
+    idToken = null; google.accounts.id.disableAutoSelect();
+    document.getElementById('testCard').hidden = true; document.getElementById('loginCard').hidden = false;
+    document.getElementById('loginMsg').textContent = '已登出。';
+  };
+});
+</script>
+</body>
+</html>
